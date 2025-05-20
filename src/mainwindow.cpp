@@ -5,72 +5,59 @@
 #include <QFileDialog>
 #include <QString>
 #include <QMessageBox>
+#include <QDebug>
+#include <iostream>
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), ui(new Ui::MainWindow), timer(new QTimer(this))
+    : QMainWindow(parent), ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
     setWindowTitle("QtImageProcessor");
 
-    // Set up button connections
+    // Connect buttons to their handlers
     connect(ui->uploadButton, &QPushButton::clicked, this, &MainWindow::onUploadButtonClicked);
     connect(ui->threshButton, &QPushButton::clicked, this, &MainWindow::onThreshButtonClicked);
     connect(ui->grayButton, &QPushButton::clicked, this, &MainWindow::grayScaleConversion);
     connect(ui->gaussianButton, &QPushButton::clicked, this, &MainWindow::GaussianBluring);
+    connect(ui->medianButton, &QPushButton::clicked, this, &MainWindow::applyMedianFilter);
+    connect(ui->histogramButton, &QPushButton::clicked, this, &MainWindow::histogramsEqualization);
+    connect(ui->dilationButton, &QPushButton::clicked, this, &MainWindow::applyDilation);
+    connect(ui->erosionButton, &QPushButton::clicked, this, &MainWindow::applyErosion);
+    connect(ui->resetButton, &QPushButton::clicked, this, &MainWindow::onResetButtonClicked);
+    connect(ui->chainModeCheckBox, &QCheckBox::toggled, this, &MainWindow::onChainModeToggled);
 
-    // Configure labels for displaying images
     ui->label->setScaledContents(true);
     ui->label->setAlignment(Qt::AlignCenter);
-
     ui->label_1->setScaledContents(true);
     ui->label_1->setAlignment(Qt::AlignCenter);
 
-    // Configure threshold sliders
     ui->sliderLow->setRange(0, 255);
     ui->sliderLow->setValue(128);
-    ui->sliderLow->setEnabled(false);
-
     ui->sliderHigh->setRange(0, 255);
     ui->sliderHigh->setValue(255);
-    ui->sliderHigh->setEnabled(false);
 
-    connect(ui->sliderLow, &QSlider::valueChanged, this, &MainWindow::onThreshButtonClicked);
-    connect(ui->sliderHigh, &QSlider::valueChanged, this, &MainWindow::onThreshButtonClicked);
-
-    // Configure Gaussian kernel slider
     ui->sliderKernel->setRange(3, 21);
     ui->sliderKernel->setValue(3);
     ui->sliderKernel->setSingleStep(2);
-    ui->sliderKernel->setEnabled(false);
 
+    ui->sliderMedian->setRange(3, 21);
+    ui->sliderMedian->setValue(3);
+    ui->sliderMedian->setSingleStep(2);
+
+    ui->sliderErosion->setRange(3, 21);
+    ui->sliderErosion->setValue(3);
+    ui->sliderErosion->setSingleStep(2);
+    ui->sliderDilation->setRange(3, 21);
+    ui->sliderDilation->setValue(3);
+    ui->sliderDilation->setSingleStep(2);
+
+    connect(ui->sliderLow, &QSlider::valueChanged, this, &MainWindow::onThreshButtonClicked);
+    connect(ui->sliderHigh, &QSlider::valueChanged, this, &MainWindow::onThreshButtonClicked);
     connect(ui->sliderKernel, &QSlider::valueChanged, this, &MainWindow::GaussianBluring);
-
-    // Configure the Median kernel slider
-    ui->sliderMedian->setRange(3, 21); // Range: 3 to 21
-    ui->sliderMedian->setSingleStep(2); // Increase by 2
-    ui->sliderMedian->setValue(3);     // Default value: 3
-    ui->sliderMedian->setEnabled(false); // Initially disabled
-
-    connect(ui->medianButton, &QPushButton::clicked, this, &MainWindow::applyMedianFilter);
     connect(ui->sliderMedian, &QSlider::valueChanged, this, &MainWindow::applyMedianFilter);
-    connect(ui->histogramButton, &QPushButton::clicked, this, &MainWindow::histogramsEqualization);
-
-    // Configure sliders for erosion and dilation
-    ui->sliderErosion->setRange(3, 21);  // Set range for kernel size
-    ui->sliderErosion->setSingleStep(2); // Increase by 2
-    ui->sliderErosion->setValue(3);      // Default value
-    ui->sliderDilation->setRange(3, 21); // Set range for kernel size
-    ui->sliderDilation->setSingleStep(2); // Increase by 2
-    ui->sliderDilation->setValue(3);     // Default value
-    ui->sliderErosion->setEnabled(false);
-    ui->sliderDilation->setEnabled(false);
-
-    connect(ui->dilationButton, &QPushButton::clicked, this, &MainWindow::applyDilation);
-    connect(ui->erosionButton, &QPushButton::clicked, this, &MainWindow::applyErosion);
     connect(ui->sliderErosion, &QSlider::valueChanged, this, &MainWindow::applyErosion);
     connect(ui->sliderDilation, &QSlider::valueChanged, this, &MainWindow::applyDilation);
 }
-
 
 MainWindow::~MainWindow()
 {
@@ -78,261 +65,311 @@ MainWindow::~MainWindow()
 }
 
 void MainWindow::activateSliders(QSlider* slider1, QSlider* slider2) {
-    // Deactivate all sliders
     ui->sliderLow->setEnabled(false);
     ui->sliderHigh->setEnabled(false);
     ui->sliderKernel->setEnabled(false);
     ui->sliderMedian->setEnabled(false);
     ui->sliderErosion->setEnabled(false);
     ui->sliderDilation->setEnabled(false);
-
-    // Activate the provided sliders
     if (slider1) slider1->setEnabled(true);
     if (slider2) slider2->setEnabled(true);
 }
 
-void MainWindow::onUploadButtonClicked()
-{
-    // Open file dialog to select image
+QImage MainWindow::matToQImage(const cv::Mat& image) {
+    if (image.empty()) {
+        qWarning("Cannot convert empty Mat to QImage.");
+        return QImage();
+    }
+    if (image.channels() == 3) {
+        return QImage(image.data, image.cols, image.rows, image.step, QImage::Format_RGB888);
+    } else if (image.channels() == 1) {
+        return QImage(image.data, image.cols, image.rows, image.step, QImage::Format_Grayscale8);
+    }
+    return QImage();
+}
+
+void MainWindow::onChainModeToggled(bool checked) {
+    isChainMode = checked;
+    if (checked && !ui->operationsTextEdit->toPlainText().isEmpty()) {
+        ui->operationsTextEdit->clear();
+    }
+}
+
+void MainWindow::onResetButtonClicked() {
+    if (originalImage.empty()) {
+        qWarning("Cannot reset: No original image loaded.");
+        return;
+    }
+    QSize labelSize = ui->label->size();
+    cv::Mat tempResizedImage;
+    if (!originalImage.empty()) {
+        double aspectRatio = (double)originalImage.cols / (double)originalImage.rows;
+        int newWidth = labelSize.width();
+        int newHeight = labelSize.height();
+        if (originalImage.cols > originalImage.rows) {
+            newHeight = static_cast<int>(newWidth / aspectRatio);
+        } else {
+            newWidth = static_cast<int>(newHeight * aspectRatio);
+        }
+        cv::resize(originalImage, tempResizedImage, cv::Size(newWidth, newHeight));
+    } else {
+        qWarning("Original image became empty unexpectedly during reset.");
+        resizedImage.release();
+        workingImage.release();
+        ui->label->clear();
+        ui->label_1->clear();
+        ui->operationsTextEdit->clear();
+        activateSliders(nullptr, nullptr);
+        return;
+    }
+    cv::cvtColor(tempResizedImage, resizedImage, cv::COLOR_BGR2RGB);
+    workingImage = resizedImage.clone();
+    isChainMode = false;
+    ui->chainModeCheckBox->setChecked(false);
+
+    QImage qImage = matToQImage(resizedImage);
+    ui->label->setPixmap(QPixmap::fromImage(qImage));
+    ui->label_1->clear();
+    ui->operationsTextEdit->clear();
+    activateSliders(nullptr, nullptr);
+}
+
+void MainWindow::onUploadButtonClicked() {
     QString filePath = QFileDialog::getOpenFileName(this, "Select Image", QDir::homePath(), "Image Files (*.png *.jpg *.jpeg *.bmp)");
-
     if (!filePath.isEmpty()) {
-        // Load the image using OpenCV
-        cv::Mat originalImage = cv::imread(filePath.toStdString());
-
+        originalImage = cv::imread(filePath.toStdString());
         if (!originalImage.empty()) {
-            // Get the size of the QLabel
             QSize labelSize = ui->label->size();
-            // Resize the image using OpenCV
-            double aspectRatio = (double)originalImage .cols / (double)originalImage .rows;
+            double aspectRatio = (double)originalImage.cols / (double)originalImage.rows;
             int newWidth = labelSize.width();
             int newHeight = labelSize.height();
-
-            if (originalImage .cols > originalImage .rows) {
+            if (originalImage.cols > originalImage.rows) {
                 newHeight = static_cast<int>(newWidth / aspectRatio);
             } else {
                 newWidth = static_cast<int>(newHeight * aspectRatio);
             }
+            cv::resize(originalImage, resizedImage, cv::Size(newWidth, newHeight));
+            cv::cvtColor(resizedImage, resizedImage, cv::COLOR_BGR2RGB);
+            workingImage = resizedImage.clone();
+            ui->operationsTextEdit->clear();
 
-            cv::resize(originalImage , resizedImage, cv::Size(newWidth, newHeight));
-
-            // Convert the OpenCV Mat to QImage (Qt uses RGB, OpenCV uses BGR)
-            cv::cvtColor(resizedImage, resizedImage, cv::COLOR_BGR2RGB); // Convert to RGB
-            QImage qImage(resizedImage.data, resizedImage.cols, resizedImage.rows, resizedImage.step, QImage::Format_RGB888);
-            // Display the image in the QLabel
+            QImage qImage = matToQImage(resizedImage);
             ui->label->setPixmap(QPixmap::fromImage(qImage));
+            ui->label_1->clear();
+
+            isChainMode = false;
+            ui->chainModeCheckBox->setChecked(false);
+            activateSliders(nullptr, nullptr);
+        } else {
+            QMessageBox::critical(this, "Error", "Could not open or find the image.");
         }
     }
 }
 
 void MainWindow::grayScaleConversion() {
-
-    if (resizedImage.empty()) {
-        qWarning("No image available for conversion!");
+    cv::Mat inputImage = isChainMode ? workingImage : resizedImage;
+    if (inputImage.empty()) {
+        qWarning("No image available for grayscale conversion!");
+        ui->label_1->clear();
         return;
     }
 
-    // Convert the resized image to grayscale
-    cv::cvtColor(resizedImage, grayScaledImage, cv::COLOR_RGB2GRAY);
-    std:: cout << "Image converted grayscale" << std::endl;
+    activateSliders(nullptr, nullptr);
 
-    QImage qImage(grayScaledImage.data, grayScaledImage.cols, grayScaledImage.rows, grayScaledImage.step, QImage::Format_Grayscale8);
+    cv::Mat outputImage;
+    if (inputImage.channels() == 3 || inputImage.channels() == 4) {
+        cv::cvtColor(inputImage, outputImage, cv::COLOR_RGB2GRAY);
+    } else if (inputImage.channels() == 1) {
+        outputImage = inputImage.clone();
+    }  else {
+        qWarning("Unsupported channel count for grayscale conversion: %d", inputImage.channels());
+        return;
+    }
 
-    // Display the thresholded image in the second QLabel
+    grayScaledImage = outputImage;
+    if (isChainMode) {
+        workingImage = grayScaledImage.clone();
+        QString currentOps = ui->operationsTextEdit->toPlainText();
+        currentOps += "→ Grayscale Conversion\n";
+        ui->operationsTextEdit->setPlainText(currentOps);
+    }
+
+    QImage qImage = matToQImage(grayScaledImage);
     ui->label_1->setPixmap(QPixmap::fromImage(qImage));
 }
 
-
-void MainWindow::onThreshButtonClicked()
-{
-    if (resizedImage.empty()) {
+void MainWindow::onThreshButtonClicked() {
+    cv::Mat inputImage = isChainMode ? workingImage : resizedImage;
+    if (inputImage.empty()) {
         qWarning("No image available for thresholding!");
+        ui->label_1->clear();
         return;
     }
 
-    if ((!ui->sliderHigh->isEnabled()) && (!ui->sliderLow->isEnabled())) {
-        ui->sliderHigh->setEnabled(true);
-        ui->sliderLow->setEnabled(true);
-    }
-
-    // Activate sliders for thresholding
     activateSliders(ui->sliderLow, ui->sliderHigh);
 
-    // Get the current values of both sliders
     int lowValue = ui->sliderLow->value();
     int highValue = ui->sliderHigh->value();
 
-    std::cout << "Low Value: " << lowValue<< "  High Value: " << highValue << std::endl;
-    // Convert the resized image to grayscale
-    cv::cvtColor(resizedImage, grayScaledImage, cv::COLOR_RGB2GRAY);
+    cv::Mat grayInput;
+    if (inputImage.channels() == 3) {
+        cv::cvtColor(inputImage, grayInput, cv::COLOR_RGB2GRAY);
+    } else if (inputImage.channels() == 1) {
+        grayInput = inputImage.clone();
+    } else {
+         qWarning("Unsupported channel count for thresholding: %d", inputImage.channels());
+         return;
+    }
 
-    // Apply binary thresholding
-    cv::threshold(grayScaledImage, threshImage, lowValue, highValue, cv::THRESH_BINARY);
+    cv::threshold(grayInput, threshImage, lowValue, highValue, cv::THRESH_BINARY);
 
-    // Convert to QImage
-    QImage qImage(threshImage.data, threshImage.cols, threshImage.rows, threshImage.step, QImage::Format_Grayscale8);
+    if (isChainMode) {
+        workingImage = threshImage.clone();
+        QString currentOps = ui->operationsTextEdit->toPlainText();
+        currentOps += QString("→ Threshold (low=%1, high=%2)\n").arg(lowValue).arg(highValue);
+        ui->operationsTextEdit->setPlainText(currentOps);
+    }
 
-    // Display the thresholded image in the second QLabel
+    QImage qImage = matToQImage(threshImage);
     ui->label_1->setPixmap(QPixmap::fromImage(qImage));
 }
-
 
 void MainWindow::GaussianBluring() {
-
-    if (resizedImage.empty()) {
-        qWarning("No image available for bluring!");
+    cv::Mat inputImage = isChainMode ? workingImage : resizedImage;
+    if (inputImage.empty()) {
+        qWarning("No image available for blurring!");
+        ui->label_1->clear();
         return;
     }
 
-    // Enable kernel slider after button press
-    if (!ui->sliderKernel->isEnabled()){
-        ui->sliderKernel->setEnabled(true);
-    }
-
-    // Activate Gaussian kernel slider
     activateSliders(ui->sliderKernel, nullptr);
 
-    // Get the kernel size from the slider
     int kernelSize = ui->sliderKernel->value();
+    if (kernelSize % 2 == 0) { kernelSize += 1; }
+    if (kernelSize < 3) kernelSize = 3;
 
-    // Ensure kernel size is odd
-        if (kernelSize % 2 == 0) {
-            kernelSize += 1;
-        }
+    cv::GaussianBlur(inputImage, gaussianBlurredImage, cv::Size(kernelSize, kernelSize), 0, 0);
+    if (isChainMode) {
+        workingImage = gaussianBlurredImage.clone();
+        QString currentOps = ui->operationsTextEdit->toPlainText();
+        currentOps += QString("→ Gaussian Blur (kernel=%1)\n").arg(kernelSize);
+        ui->operationsTextEdit->setPlainText(currentOps);
+    }
 
-    std::cout << "Gaussian Kernel Size: " << "(" <<kernelSize << ", " <<kernelSize<<")" << std::endl;
-
-    cv::GaussianBlur(resizedImage, gaussianBlurredImage, cv::Size(kernelSize, kernelSize), 0);
-
-    QImage qImage(gaussianBlurredImage.data, gaussianBlurredImage.cols, gaussianBlurredImage.rows, gaussianBlurredImage.step, QImage::QImage::Format_RGB888);
-
-    // Display the thresholded image in the second QLabel
+    QImage qImage = matToQImage(gaussianBlurredImage);
     ui->label_1->setPixmap(QPixmap::fromImage(qImage));
 }
 
-void MainWindow::applyMedianFilter()
-{
-    if (resizedImage.empty()) {
-        qWarning("No image available for filtering!");
+void MainWindow::applyMedianFilter() {
+    cv::Mat inputImage = isChainMode ? workingImage : resizedImage;
+    if (inputImage.empty()) {
+        qWarning("No image available for median filtering!");
+        ui->label_1->clear();
         return;
     }
 
-    if (!ui->sliderMedian->isEnabled()){
-        ui->sliderMedian->setEnabled(true);
-    }
-
-    // Activate median slider
     activateSliders(ui->sliderMedian, nullptr);
 
-    // Get kernel size from the slider
     int kernelSize = ui->sliderMedian->value();
-    // Ensure the kernel size is odd
-    if (kernelSize % 2 == 0) {
-        kernelSize += 1; // Increment to make it odd
+    if (kernelSize % 2 == 0) { kernelSize += 1; }
+    if (kernelSize < 3) kernelSize = 3;
+
+    cv::medianBlur(inputImage, medianFilteredImage, kernelSize);
+    if (isChainMode) {
+        workingImage = medianFilteredImage.clone();
+        QString currentOps = ui->operationsTextEdit->toPlainText();
+        currentOps += QString("→ Median Filter (kernel=%1)\n").arg(kernelSize);
+        ui->operationsTextEdit->setPlainText(currentOps);
     }
-    std::cout << "Median Kernel Size: " << kernelSize << std::endl;
-    // Apply the median filter
-    cv::medianBlur(resizedImage,  medianFilteredImage, kernelSize);
 
-    // Convert the filtered image to QImage
-    QImage qImage(medianFilteredImage.data,  medianFilteredImage.cols,  medianFilteredImage.rows,  medianFilteredImage.step, QImage::Format_RGB888);
-
-    // Display the filtered image in the second QLabel
+    QImage qImage = matToQImage(medianFilteredImage);
     ui->label_1->setPixmap(QPixmap::fromImage(qImage));
 }
 
-void MainWindow::histogramsEqualization()
-{
-    if (resizedImage.empty()) {
-        qWarning("No image available for filtering!");
+void MainWindow::histogramsEqualization() {
+    cv::Mat inputImage = isChainMode ? workingImage : resizedImage;
+    if (inputImage.empty()) {
+        qWarning("No image available for histogram equalization!");
+        ui->label_1->clear();
         return;
     }
 
-    // Convert the resized image to grayscale
-    cv::cvtColor(resizedImage, grayScaledImage, cv::COLOR_RGB2GRAY);
+    activateSliders(nullptr, nullptr);
 
-    // Apply the median filter
-    cv::equalizeHist(grayScaledImage, equImage);
-    std::cout << "Histogram equalization" << std::endl;
+    cv::Mat grayInput;
+    if (inputImage.channels() == 3) {
+        cv::cvtColor(inputImage, grayInput, cv::COLOR_RGB2GRAY);
+    } else if (inputImage.channels() == 1) {
+        grayInput = inputImage.clone();
+    } else {
+         qWarning("Unsupported channel count for histogram equalization: %d", inputImage.channels());
+        return;
+    }
 
-    // Convert the filtered image to QImage
-    QImage qImage(equImage.data, equImage.cols, equImage.rows,equImage.step, QImage::Format_Grayscale8);
+    cv::equalizeHist(grayInput, equImage);
+    if (isChainMode) {
+        workingImage = equImage.clone();
+        QString currentOps = ui->operationsTextEdit->toPlainText();
+        currentOps += "→ Histogram Equalization\n";
+        ui->operationsTextEdit->setPlainText(currentOps);
+    }
 
-    // Display the filtered image in the second QLabel
+    QImage qImage = matToQImage(equImage);
     ui->label_1->setPixmap(QPixmap::fromImage(qImage));
 }
 
-void MainWindow::applyDilation()
-{
-    if (resizedImage.empty()) {
+void MainWindow::applyDilation() {
+    cv::Mat inputImage = isChainMode ? workingImage : resizedImage;
+    if (inputImage.empty()) {
         qWarning("No image available for dilation!");
+        ui->label_1->clear();
         return;
     }
 
-    // Enable Dilation slider after button press
-    if (!ui->sliderDilation->isEnabled()){
-        ui->sliderDilation->setEnabled(true);
-    }
-
-    // Activate sliders for dilation
     activateSliders(ui->sliderDilation, nullptr);
 
-    // Get the kernel size from the slider
     int dilationSize = ui->sliderDilation->value();
+    if (dilationSize % 2 == 0) { dilationSize += 1; }
+    if (dilationSize < 1) dilationSize = 1;
 
-    // Ensure kernel size is odd
-    if (dilationSize % 2 == 0) {
-        dilationSize += 1;
+    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(dilationSize, dilationSize));
+    cv::dilate(inputImage, dilationImage, kernel);
+
+    if (isChainMode) {
+        workingImage = dilationImage.clone();
+        QString currentOps = ui->operationsTextEdit->toPlainText();
+        currentOps += QString("→ Dilation (kernel=%1)\n").arg(dilationSize);
+        ui->operationsTextEdit->setPlainText(currentOps);
     }
 
-    std::cout << "Dilation Kernel Size: " << "(" <<dilationSize << ", " <<dilationSize<<")" << std::endl;
-
-    // Define the structuring element (kernel)
-    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(dilationSize, dilationSize));
-
-    // Apply dilation
-    cv::dilate(resizedImage, dilationImage, kernel);
-
-    // Convert the dilated image to QImage
-    QImage qImage(dilationImage.data, dilationImage.cols, dilationImage.rows, dilationImage.step, QImage::Format_RGB888);
-
-    // Display the dilated image in the second QLabel
+    QImage qImage = matToQImage(dilationImage);
     ui->label_1->setPixmap(QPixmap::fromImage(qImage));
 }
 
-void MainWindow::applyErosion()
-{
-    if (resizedImage.empty()) {
+void MainWindow::applyErosion() {
+    cv::Mat inputImage = isChainMode ? workingImage : resizedImage;
+    if (inputImage.empty()) {
         qWarning("No image available for erosion!");
+        ui->label_1->clear();
         return;
     }
 
-    if (!ui->sliderErosion->isEnabled()) {
-        ui->sliderErosion->setEnabled(true);
-    }
-
-    // Activate sliders for erosion
     activateSliders(ui->sliderErosion, nullptr);
 
-    // Get the kernel size from the slider
     int erosionSize = ui->sliderErosion->value();
+     if (erosionSize % 2 == 0) { erosionSize += 1; }
+     if (erosionSize < 1) erosionSize = 1;
 
-    // Ensure kernel size is odd
-    if (erosionSize % 2 == 0) {
-        erosionSize += 1;
+    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(erosionSize, erosionSize));
+    cv::erode(inputImage, erosionImage, kernel);
+
+    if (isChainMode) {
+        workingImage = erosionImage.clone();
+        QString currentOps = ui->operationsTextEdit->toPlainText();
+        currentOps += QString("→ Erosion (kernel=%1)\n").arg(erosionSize);
+        ui->operationsTextEdit->setPlainText(currentOps);
     }
 
-    std::cout << "Erosion Kernel Size: " << "(" <<erosionSize << ", " <<erosionSize<<")" << std::endl;
-
-    // Define the structuring element (kernel)
-    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(erosionSize, erosionSize));
-
-    // Apply erosion
-    cv::erode(resizedImage, erosionImage, kernel);
-
-    // Convert the eroded image to QImage
-    QImage qImage(erosionImage.data, erosionImage.cols, erosionImage.rows, erosionImage.step, QImage::Format_RGB888);
-
-    // Display the eroded image in the second QLabel
+    QImage qImage = matToQImage(erosionImage);
     ui->label_1->setPixmap(QPixmap::fromImage(qImage));
 }

@@ -5,6 +5,8 @@
 #include <QTimer>
 #include <QSlider>
 #include <opencv2/opencv.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
 
 namespace Ui {
 class MainWindow;
@@ -19,8 +21,9 @@ public:
     ~MainWindow();
 
 private slots:
-    void activateSliders(QSlider* slider1, QSlider* slider2);
     void onUploadButtonClicked();
+    void onResetButtonClicked();
+    void onChainModeToggled(bool checked);
     void onThreshButtonClicked();
     void GaussianBluring();
     void grayScaleConversion();
@@ -30,8 +33,18 @@ private slots:
     void applyErosion();
 
 private:
+    // Helper functions
+    void activateSliders(QSlider* slider1, QSlider* slider2);
+    QImage matToQImage(const cv::Mat& image);
+
     Ui::MainWindow *ui;
-    cv::Mat resizedImage; // Store the resized image for reuse
+
+    // Image storage
+    cv::Mat originalImage;     // Original uploaded image
+    cv::Mat resizedImage;      // Resized image for display
+    cv::Mat workingImage;      // Current working image for chaining
+
+    // Operation output images
     cv::Mat grayScaledImage;
     cv::Mat gaussianBlurredImage;
     cv::Mat medianFilteredImage;
@@ -39,7 +52,9 @@ private:
     cv::Mat erosionImage;
     cv::Mat dilationImage;
     cv::Mat threshImage;
-    QTimer *timer;         // Timer to refresh frames
+
+    // Control flags
+    bool isChainMode = false;
 };
 
-#endif
+#endif // MAINWINDOW_H
