@@ -6,7 +6,7 @@ A Qt-based application for image processing using OpenCV.
 - Upload and display images.
 - Apply thresholding, Gaussian blur, grayscale conversion, median filtering, and more.
 
-![User Interface](images/ui_screenshot.png)
+![User Interface](assets/ui_screenshot.png)
 
 ## Prerequisites
 - Qt 5.15.3
